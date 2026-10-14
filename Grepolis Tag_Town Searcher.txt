@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Grepolis Tag Searcher
 // @namespace    https://grepolis.com/
-// @version      1.0.7
+// @version      1.0.0
 // @description  Search Tags from Map Enhancer
 // @author       the invincble
 // @include      http://*.grepolis.com/game/*
@@ -440,7 +440,151 @@
         wnd.setContent(buildWindowHtml());
 
         bindWindowEvents(wnd);
+        installGrepolisMinimizeButton(wnd);
         renderResults('');
+    }
+
+    function installGrepolisMinimizeButton(wnd) {
+    setTimeout(() => {
+        const dialog = getDialogElementForWindow(wnd);
+        if (!dialog) return;
+
+        const titlebar = dialog.querySelector('.ui-dialog-titlebar');
+        if (!titlebar) return;
+
+        if (titlebar.querySelector('.ui-dialog-titlebar-minimize')) return;
+
+        const closeButton = titlebar.querySelector('.ui-dialog-titlebar-close');
+
+        const minimizeButton = document.createElement('a');
+        minimizeButton.href = '#';
+        minimizeButton.className = 'ui-dialog-titlebar-minimize ui-corner-all';
+        minimizeButton.setAttribute('role', 'button');
+        minimizeButton.setAttribute('title', 'Minimize');
+
+        /*
+         * IMPORTANT:
+         * Grepolis positions the controls according to their own CSS.
+         * Therefore we add minimize AFTER close.
+         *
+         * Current:
+         * [ X ] [ - ]
+         *
+         * Wanted:
+         * [ - ] [ X ]
+         */
+        if (closeButton) {
+            closeButton.insertAdjacentElement('afterend', minimizeButton);
+        } else {
+            titlebar.appendChild(minimizeButton);
+        }
+
+        minimizeButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            minimizeGrepolisWindow(wnd, dialog);
+        });
+
+    }, 50);
+}
+
+    function getDialogElementForWindow(wnd) {
+        // First try Grepolis' own window/jQuery references.
+        try {
+            const jq = wnd?.getJQElement?.();
+            if (jq?.length) {
+                const element = jq[0];
+                return element.classList?.contains('ui-dialog')
+                    ? element
+                    : element.closest?.('.ui-dialog') || element.parentElement?.closest?.('.ui-dialog');
+            }
+        } catch (_) {}
+
+        // Fallback: locate the dialog by its visible title.
+        const titles = [...document.querySelectorAll('.ui-dialog-title')];
+        const title = titles.find(el => el.textContent.trim() === WINDOW_TITLE);
+        return title?.closest('.ui-dialog') || null;
+    }
+
+    function minimizeGrepolisWindow(wnd, dialog) {
+        if (!dialog) return;
+
+        // Hide the actual dialog, but keep the Grepolis window object alive.
+        dialog.style.display = 'none';
+        createMinimizedWindowEntry(wnd, dialog);
+    }
+
+    function createMinimizedWindowEntry(wnd, dialog) {
+        const windowsArea = document.querySelector('#minimized_windows_area .windows');
+        if (!windowsArea) {
+            // If Grepolis has not created the minimized area yet, restore the window.
+            dialog.style.display = '';
+            return;
+        }
+
+        const entryId = 'gme-tag-search-minimized';
+        document.getElementById(entryId)?.remove();
+
+        const box = document.createElement('div');
+        box.className = 'box';
+        box.id = entryId;
+
+        // Grepolis' minimized-window markup.
+        box.innerHTML = `
+            <div class="box-left"></div>
+            <div class="box-right"></div>
+            <div class="box-middle">
+                <div class="caption">${escapeHtml(WINDOW_TITLE)}</div>
+                <div class="btn_wnd close"></div>
+                <div class="btn_wnd maximize"></div>
+            </div>`;
+
+        windowsArea.appendChild(box);
+
+        const minimizedArea = document.querySelector('#minimized_windows_area .minimized_windows_area');
+        if (minimizedArea) minimizedArea.style.display = 'block';
+
+        const maximize = box.querySelector('.btn_wnd.maximize');
+        const close = box.querySelector('.btn_wnd.close');
+        const caption = box.querySelector('.caption');
+
+        const restore = event => {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            box.remove();
+            dialog.style.display = '';
+
+            // Bring the restored dialog to the front if jQuery UI is available.
+            try {
+                if (uw.$ && uw.$(dialog).dialog) {
+                    uw.$(dialog).dialog('moveToTop');
+                }
+            } catch (_) {}
+
+            setTimeout(() => document.getElementById('gme-tag-query')?.focus(), 25);
+        };
+
+        maximize?.addEventListener('click', restore);
+        caption?.addEventListener('click', restore);
+
+        close?.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            box.remove();
+
+            try {
+                if (typeof wnd?.close === 'function') {
+                    wnd.close();
+                } else if (typeof wnd?.destroy === 'function') {
+                    wnd.destroy();
+                } else {
+                    dialog.remove();
+                }
+            } catch (_) {
+                dialog.remove();
+            }
+        });
     }
 
     function findExistingWindow() {
@@ -881,3 +1025,5 @@ div.classNme = 'gme-tag-result';
         return response;
     }
 })();
+
+
